@@ -1,0 +1,546 @@
+services:
+  log:
+    image: goharbor/harbor-log:v2.14.0
+    container_name: harbor_log # <-- Geändert
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    volumes:
+      - /var/log/harbor/:/var/log/docker/:z
+      - type: bind
+        source: ./common/config/log/logrotate.conf
+        target: /etc/logrotate.d/logrotate.conf
+      - type: bind
+        source: ./common/config/log/rsyslog_docker.conf
+        target: /etc/rsyslog.d/rsyslog_docker.conf
+    ports:
+      - 127.0.0.1:1514:10514
+    networks:
+      - harbor
+  registry:
+    image: goharbor/registry-photon:v2.14.0
+    container_name: harbor_registry # <-- Geändert
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    volumes:
+      - /opt/komodo/harbor/data//registry:/storage:z
+      - ./common/config/registry/:/etc/registry/:z
+      - type: bind
+        source: /opt/komodo/harbor/data//secret/registry/root.crt
+        target: /etc/registry/root.crt
+      - type: bind
+        source: ./common/config/shared/trust-certificates
+        target: /harbor_cust_cert
+    networks:
+      - harbor
+    depends_on:
+      - log
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "registry"
+  registryctl:
+    image: goharbor/harbor-registryctl:v2.14.0
+    container_name: harbor_registryctl # <-- Geändert
+    env_file:
+      - ./common/config/registryctl/env
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    volumes:
+      - /opt/komodo/harbor/data//registry:/storage:z
+      - ./common/config/registry/:/etc/registry/:z
+      - type: bind
+        source: ./common/config/registryctl/config.yml
+        target: /etc/registryctl/config.yml
+      - type: bind
+        source: ./common/config/shared/trust-certificates
+        target: /harbor_cust_cert
+    networks:
+      - harbor
+    depends_on:
+      - log
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "registryctl"
+  postgresql:
+    image: goharbor/harbor-db:v2.14.0
+    container_name: harbor_db # <-- Geändert
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    volumes:
+      - /opt/komodo/harbor/data//database:/var/lib/postgresql/data:z
+    networks:
+      - harbor  # <-- KORRIGIERT
+    env_file:
+      - ./common/config/db/env
+    depends_on:
+      - log
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "postgresql"
+    shm_size: '1gb'
+  core:
+    image: goharbor/harbor-core:v2.14.0
+    container_name: harbor_core # <-- Geändert
+    env_file:
+      - ./common/config/core/env
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    volumes:
+      - /opt/komodo/harbor/data//ca_download/:/etc/core/ca/:z
+      - /opt/komodo/harbor/data//:/data/:z
+      - ./common/config/core/certificates/:/etc/core/certificates/:z
+      - type: bind
+        source: ./common/config/core/app.conf
+        target: /etc/core/app.conf
+      - type: bind
+        source: /opt/komodo/harbor/data//secret/core/private_key.pem
+        target: /etc/core/private_key.pem
+      - type: bind
+        source: /opt/komodo/harbor/data//secret/keys/secretkey
+        target: /etc/core/key
+      - type: bind
+        source: ./common/config/shared/trust-certificates
+        target: /harbor_cust_cert
+    networks:
+      - harbor  # <-- KORRIGIERT
+    depends_on:
+      - log
+      - registry
+      - redis
+      - postgresql
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "core"
+  portal:
+    image: goharbor/harbor-portal:v2.14.0
+    container_name: harbor_portal # <-- Geändert
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    volumes:
+      - type: bind
+        source: ./common/config/portal/nginx.conf
+        target: /etc/nginx/nginx.conf
+    networks:
+      - harbor
+    depends_on:
+      - log
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "portal"
+
+  jobservice:
+    image: goharbor/harbor-jobservice:v2.14.0
+    container_name: harbor_jobservice # <-- Geändert
+    env_file:
+      - ./common/config/jobservice/env
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    volumes:
+      - /opt/komodo/harbor/data//job_logs:/var/log/jobs:z
+      - type: bind
+        source: ./common/config/jobservice/config.yml
+        target: /etc/jobservice/config.yml
+      - type: bind
+        source: ./common/config/shared/trust-certificates
+        target: /harbor_cust_cert
+    networks:
+      - harbor
+    depends_on:
+      - core
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "jobservice"
+  redis:
+    image: goharbor/redis-photon:v2.14.0
+    container_name: harbor_redis # <-- Geändert
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    volumes:
+      - /opt/komodo/harbor/data//redis:/var/lib/redis
+    networks:
+      - harbor  # <-- KORRIGIERT
+    depends_on:
+      - log
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "redis"
+  proxy:
+    image: goharbor/nginx-photon:v2.14.0
+    container_name: harbor_proxy # <-- Geändert
+    restart: always
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+      - NET_BIND_SERVICE
+    volumes:
+      - ./common/config/nginx:/etc/nginx:z
+      - type: bind
+        source: ./common/config/shared/trust-certificates
+        target: /harbor_cust_cert
+    networks:
+      - harbor
+      - newt_talk
+#    ports:
+#      - 80:8080
+    depends_on:
+      - registry
+      - core
+      - portal
+      - log
+    labels:
+      # =============================================================
+      # Homepage Dashboard Configuration
+      # =============================================================
+      - homepage.group=Management
+      - homepage.name=Harbor
+      - homepage.icon=harbor.png
+      - homepage.href=harbor.sunriseing.dev
+      - homepage.description=Harbor
+
+      # =============================================================
+      # Pangolin Reverse Proxy - Basic Configuration
+      # =============================================================
+      - pangolin.proxy-resources.harbor.name=Harbor
+      - pangolin.proxy-resources.harbor.full-domain=harbor.sunriseing.dev
+      - pangolin.proxy-resources.harbor.protocol=http
+
+      # =============================================================
+      # Pangolin Reverse Proxy - Target Configuration
+      # =============================================================
+      - pangolin.proxy-resources.harbor.targets[0].method=http
+      - pangolin.proxy-resources.harbor.targets[0].hostname=harbor_proxy # <-- Geändert
+      - pangolin.proxy-resources.harbor.targets[0].port=8080
+
+      # =============================================================
+      # Pangolin Reverse Proxy - Access Rules & Authentication
+      # =============================================================
+      # IP & Country-based Access Control (auskommentiert - Beispiel)
+      - pangolin.proxy-resources.harbor.rules[0].action=allow
+      - pangolin.proxy-resources.harbor.rules[0].match=ip
+      - pangolin.proxy-resources.harbor.rules[0].value=37.44.215.125
+
+      - pangolin.proxy-resources.harbor.rules[1].action=allow
+      - pangolin.proxy-resources.harbor.rules[1].match=cidr
+      - pangolin.proxy-resources.harbor.rules[1].value=2a13:7e80:0:200::/64
+
+      - pangolin.proxy-resources.harbor.rules[2].action=allow
+      - pangolin.proxy-resources.harbor.rules[2].match=ip
+      - pangolin.proxy-resources.harbor.rules[2].value=5.83.145.94
+
+      - pangolin.proxy-resources.harbor.rules[3].action=allow
+      - pangolin.proxy-resources.harbor.rules[3].match=cidr
+      - pangolin.proxy-resources.harbor.rules[3].value=2a13:7e80:0:563::/64
+
+      - pangolin.proxy-resources.harbor.rules[4].action=allow
+      - pangolin.proxy-resources.harbor.rules[4].match=ip
+      - pangolin.proxy-resources.harbor.rules[4].value=5.83.145.130
+
+      - pangolin.proxy-resources.harbor.rules[5].action=allow
+      - pangolin.proxy-resources.harbor.rules[5].match=cidr
+      - pangolin.proxy-resources.harbor.rules[5].value=2a1S:7e80:0:582::/64
+
+      - pangolin.proxy-resources.harbor.rules[6].action=allow
+      - pangolin.proxy-resources.harbor.rules[6].match=country
+      - pangolin.proxy-resources.harbor.rules[6].value=AT
+
+      - pangolin.proxy-resources.harbor.rules[7].action=allow
+      - pangolin.proxy-resources.harbor.rules[7].match=country
+      - pangolin.proxy-resources.harbor.rules[7].value=BE
+
+      - pangolin.proxy-resources.harbor.rules[8].action=allow
+      - pangolin.proxy-resources.harbor.rules[8].match=country
+      - pangolin.proxy-resources.harbor.rules[8].value=BG
+
+      - pangolin.proxy-resources.harbor.rules[9].action=allow
+      - pangolin.proxy-resources.harbor.rules[9].match=country
+      - pangolin.proxy-resources.harbor.rules[9].value=HR
+
+      - pangolin.proxy-resources.harbor.rules[10].action=allow
+      - pangolin.proxy-resources.harbor.rules[10].match=country
+      - pangolin.proxy-resources.harbor.rules[10].value=CY
+
+      - pangolin.proxy-resources.harbor.rules[11].action=allow
+      - pangolin.proxy-resources.harbor.rules[11].match=country
+      - pangolin.proxy-resources.harbor.rules[11].value=CZ
+
+      - pangolin.proxy-resources.harbor.rules[12].action=allow
+      - pangolin.proxy-resources.harbor.rules[12].match=country
+      - pangolin.proxy-resources.harbor.rules[12].value=DK
+
+      - pangolin.proxy-resources.harbor.rules[13].action=allow
+      - pangolin.proxy-resources.harbor.rules[13].match=country
+      - pangolin.proxy-resources.harbor.rules[13].value=EE
+
+      - pangolin.proxy-resources.harbor.rules[14].action=allow
+      - pangolin.proxy-resources.harbor.rules[14].match=country
+      - pangolin.proxy-resources.harbor.rules[14].value=FI
+
+      - pangolin.proxy-resources.harbor.rules[15].action=allow
+      - pangolin.proxy-resources.harbor.rules[15].match=country
+      - pangolin.proxy-resources.harbor.rules[15].value=FR
+
+      - pangolin.proxy-resources.harbor.rules[16].action=allow
+      - pangolin.proxy-resources.harbor.rules[16].match=country
+      - pangolin.proxy-resources.harbor.rules[16].value=DE
+
+      - pangolin.proxy-resources.harbor.rules[17].action=allow
+      - pangolin.proxy-resources.harbor.rules[17].match=country
+      - pangolin.proxy-resources.harbor.rules[17].value=GR
+
+      - pangolin.proxy-resources.harbor.rules[18].action=allow
+      - pangolin.proxy-resources.harbor.rules[18].match=country
+      - pangolin.proxy-resources.harbor.rules[18].value=HU
+
+      - pangolin.proxy-resources.harbor.rules[19].action=allow
+      - pangolin.proxy-resources.harbor.rules[19].match=country
+      - pangolin.proxy-resources.harbor.rules[19].value=IE
+
+      - pangolin.proxy-resources.harbor.rules[20].action=allow
+      - pangolin.proxy-resources.harbor.rules[20].match=country
+      - pangolin.proxy-resources.harbor.rules[20].value=IT
+
+      - pangolin.proxy-resources.harbor.rules[21].action=allow
+      - pangolin.proxy-resources.harbor.rules[21].match=country
+      - pangolin.proxy-resources.harbor.rules[21].value=LV
+
+      - pangolin.proxy-resources.harbor.rules[22].action=allow
+      - pangolin.proxy-resources.harbor.rules[22].match=country
+      - pangolin.proxy-resources.harbor.rules[22].value=LT
+
+      # Access Rules & Authentication
+      # =============================================================
+      # IP & Country-based Access Control (auskommentiert - Beispiel)
+      - pangolin.proxy-resources.harbor.rules[0].action=allow
+      - pangolin.proxy-resources.harbor.rules[0].match=ip
+      - pangolin.proxy-resources.harbor.rules[0].value=37.44.215.125
+
+      - pangolin.proxy-resources.harbor.rules[1].action=allow
+      - pangolin.proxy-resources.harbor.rules[1].match=cidr
+      - pangolin.proxy-resources.harbor.rules[1].value=2a13:7e80:0:200::/64
+
+      - pangolin.proxy-resources.harbor.rules[2].action=allow
+      - pangolin.proxy-resources.harbor.rules[2].match=ip
+      - pangolin.proxy-resources.harbor.rules[2].value=5.83.145.94
+
+      - pangolin.proxy-resources.harbor.rules[3].action=allow
+      - pangolin.proxy-resources.harbor.rules[3].match=cidr
+      - pangolin.proxy-resources.harbor.rules[3].value=2a13:7e80:0:563::/64
+
+      - pangolin.proxy-resources.harbor.rules[4].action=allow
+      - pangolin.proxy-resources.harbor.rules[4].match=ip
+      - pangolin.proxy-resources.harbor.rules[4].value=5.83.145.130
+
+      - pangolin.proxy-resources.harbor.rules[5].action=allow
+      - pangolin.proxy-resources.harbor.rules[5].match=cidr
+      - pangolin.proxy-resources.harbor.rules[5].value=2a13:7e80:0:582::/64
+
+      - pangolin.proxy-resources.harbor.rules[6].action=allow
+      - pangolin.proxy-resources.harbor.rules[6].match=country
+      - pangolin.proxy-resources.harbor.rules[6].value=AT
+
+      - pangolin.proxy-resources.harbor.rules[7].action=allow
+      - pangolin.proxy-resources.harbor.rules[7].match=country
+      - pangolin.proxy-resources.harbor.rules[7].value=BE
+
+      - pangolin.proxy-resources.harbor.rules[8].action=allow
+      - pangolin.proxy-resources.harbor.rules[8].match=country
+      - pangolin.proxy-resources.harbor.rules[8].value=BG
+
+      - pangolin.proxy-resources.harbor.rules[9].action=allow
+      - pangolin.proxy-resources.harbor.rules[9].match=country
+      - pangolin.proxy-resources.harbor.rules[9].value=HR
+
+      - pangolin.proxy-resources.harbor.rules[10].action=allow
+      - pangolin.proxy-resources.harbor.rules[10].match=country
+      - pangolin.proxy-resources.harbor.rules[10].value=CY
+
+      - pangolin.proxy-resources.harbor.rules[11].action=allow
+      - pangolin.proxy-resources.harbor.rules[11].match=country
+      - pangolin.proxy-resources.harbor.rules[11].value=CZ
+
+      - pangolin.proxy-resources.harbor.rules[12].action=allow
+      - pangolin.proxy-resources.harbor.rules[12].match=country
+      - pangolin.proxy-resources.harbor.rules[12].value=DK
+
+      - pangolin.proxy-resources.harbor.rules[13].action=allow
+      - pangolin.proxy-resources.harbor.rules[13].match=country
+      - pangolin.proxy-resources.harbor.rules[13].value=EE
+
+      - pangolin.proxy-resources.harbor.rules[14].action=allow
+      - pangolin.proxy-resources.harbor.rules[14].match=country
+      - pangolin.proxy-resources.harbor.rules[14].value=FI
+
+      - pangolin.proxy-resources.harbor.rules[15].action=allow
+      - pangolin.proxy-resources.harbor.rules[15].match=country
+      - pangolin.proxy-resources.harbor.rules[15].value=FR
+
+      - pangolin.proxy-resources.harbor.rules[16].action=allow
+      - pangolin.proxy-resources.harbor.rules[16].match=country
+      - pangolin.proxy-resources.harbor.rules[16].value=DE
+
+      - pangolin.proxy-resources.harbor.rules[17].action=allow
+      - pangolin.proxy-resources.harbor.rules[17].match=country
+      - pangolin.proxy-resources.harbor.rules[17].value=GR
+
+      - pangolin.proxy-resources.harbor.rules[18].action=allow
+      - pangolin.proxy-resources.harbor.rules[18].match=country
+      - pangolin.proxy-resources.harbor.rules[18].value=HU
+
+      - pangolin.proxy-resources.harbor.rules[19].action=allow
+      - pangolin.proxy-resources.harbor.rules[19].match=country
+      - pangolin.proxy-resources.harbor.rules[19].value=IE
+
+      - pangolin.proxy-resources.harbor.rules[20].action=allow
+      - pangolin.proxy-resources.harbor.rules[20].match=country
+      - pangolin.proxy-resources.harbor.rules[20].value=IT
+
+      - pangolin.proxy-resources.harbor.rules[21].action=allow
+      - pangolin.proxy-resources.harbor.rules[21].match=country
+      - pangolin.proxy-resources.harbor.rules[21].value=LV
+
+      - pangolin.proxy-resources.harbor.rules[22].action=allow
+      - pangolin.proxy-resources.harbor.rules[22].match=country
+      - pangolin.proxy-resources.harbor.rules[22].value=LT
+
+      - pangolin.proxy-resources.harbor.rules[23].action=allow
+      - pangolin.proxy-resources.harbor.rules[23].match=country
+      - pangolin.proxy-resources.harbor.rules[23].value=LU
+
+      - pangolin.proxy-resources.harbor.rules[24].action=allow
+      - pangolin.proxy-resources.harbor.rules[24].match=country
+      - pangolin.proxy-resources.harbor.rules[24].value=MT
+
+      - pangolin.proxy-resources.harbor.rules[25].action=allow
+      - pangolin.proxy-resources.harbor.rules[25].match=country
+      - pangolin.proxy-resources.harbor.rules[25].value=NL
+
+      - pangolin.proxy-resources.harbor.rules[26].action=allow
+      - pangolin.proxy-resources.harbor.rules[26].match=country
+      - pangolin.proxy-resources.harbor.rules[26].value=PL
+
+      - pangolin.proxy-resources.harbor.rules[27].action=allow
+      - pangolin.proxy-resources.harbor.rules[27].match=country
+      - pangolin.proxy-resources.harbor.rules[27].value=PT
+
+      - pangolin.proxy-resources.harbor.rules[28].action=allow
+      - pangolin.proxy-resources.harbor.rules[28].match=country
+      - pangolin.proxy-resources.harbor.rules[28].value=RO
+
+      - pangolin.proxy-resources.harbor.rules[29].action=allow
+      - pangolin.proxy-resources.harbor.rules[29].match=country
+      - pangolin.proxy-resources.harbor.rules[29].value=SK
+
+      - pangolin.proxy-resources.harbor.rules[30].action=allow
+      - pangolin.proxy-resources.harbor.rules[30].match=country
+      - pangolin.proxy-resources.harbor.rules[30].value=SI
+
+      - pangolin.proxy-resources.harbor.rules[31].action=allow
+      - pangolin.proxy-resources.harbor.rules[31].match=country
+      - pangolin.proxy-resources.harbor.rules[31].value=ES
+
+      - pangolin.proxy-resources.harbor.rules[32].action=allow
+      - pangolin.proxy-resources.harbor.rules[32].match=country
+      - pangolin.proxy-resources.harbor.rules[32].value=SE
+
+      - pangolin.proxy-resources.harbor.rules[33].action=deny
+      - pangolin.proxy-resources.harbor.rules[33].match=country
+      - pangolin.proxy-resources.harbor.rules[33].value=ALL
+
+      # SSO Authentication (auskommentiert - Beispiel)
+      - pangolin.proxy-resources.harbor.auth.sso-enabled=true
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "proxy"
+  trivy-adapter:
+    container_name: harbor_trivy_adapter # <-- Geändert
+    image: goharbor/trivy-adapter-photon:v2.14.0
+    restart: always
+    cap_drop:
+      - ALL
+    depends_on:
+      - log
+      - redis
+    networks:
+      - harbor
+    volumes:
+      - type: bind
+        source: /opt/komodo/harbor/data//trivy-adapter/trivy
+        target: /home/scanner/.cache/trivy
+      - type: bind
+        source: /opt/komodo/harbor/data//trivy-adapter/reports
+        target: /home/scanner/.cache/reports
+      - type: bind
+        source: ./common/config/shared/trust-certificates
+        target: /harbor_cust_cert
+    logging:
+      driver: "syslog"
+      options:
+        syslog-address: "tcp://localhost:1514"
+        tag: "trivy-adapter"
+    env_file:
+      ./common/config/trivy-adapter/env
+networks:
+  harbor:
+    external: false
+  newt_talk:
+    external: true
